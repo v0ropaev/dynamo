@@ -160,6 +160,11 @@ func materializedCliqueNameForReplica(pcsName, templateName string, replica int3
 func (p *MaterializationPlan) validatePodHostname(role, templateName string, podIndex int) error {
 	// Validate the longest replica name without copying the full materialization plan.
 	cliqueName := materializedCliqueNameForReplica(p.LPXScalingGroup, templateName, max(0, p.Replicas-1))
+	return validatePodHostname(role, cliqueName, podIndex)
+}
+
+// validatePodHostname checks the hostname of podIndex in the named PodClique.
+func validatePodHostname(role, cliqueName string, podIndex int) error {
 	hostname := materializedPodHostname(cliqueName, podIndex)
 	if problems := validation.IsDNS1123Label(hostname); len(problems) != 0 {
 		return fmt.Errorf(

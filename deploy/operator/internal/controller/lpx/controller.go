@@ -243,7 +243,7 @@ func (r *graphReconciler) reconcileWorkloads(
 			workload := workloads[groupName]
 			pcsg := pcsgs[plan.LPXScalingGroup]
 			// Keep request ordinals aligned with the capacity Grove permits us to manage.
-			replicas, explicit, required, err := resolveWorkloadCapacity(dgd.GetComponentByName(groupName), pcsg, pclqs, plan, scalingBlocked)
+			replicas, explicit, required, err := resolveWorkloadCapacity(dgd.GetComponentByName(groupName), pcsg, pclqs, plan, workload, desiredPCS, scalingBlocked)
 			if err != nil {
 				return ctrl.Result{}, err
 			}
@@ -390,6 +390,8 @@ func resolveWorkloadCapacity(
 	pcsg *grovev1alpha1.PodCliqueScalingGroup,
 	pclqs map[string]*grovev1alpha1.PodClique,
 	plan *lpx.MaterializationPlan,
+	workload *lpx.Workload,
+	pcs *grovev1alpha1.PodCliqueSet,
 	scalingBlocked bool,
 ) (int32, *int32, bool, error) {
 	replicas, explicit := plan.Replicas, component.Replicas
@@ -407,11 +409,12 @@ func resolveWorkloadCapacity(
 	// External scaling and scaling waits both use the group's live replica count.
 	if explicit == nil || scalingBlocked {
 		replicas = pcsg.Spec.Replicas
-		capacityPlan := *plan
-		capacityPlan.Replicas = replicas
-		if err := capacityPlan.ValidateReplicaCount(); err != nil {
-			return 0, nil, false, err
-		}
+	}
+	// Validate the resolved capacity against every rendered role before publishing requests.
+	capacityPlan := *plan
+	capacityPlan.Replicas = replicas
+	if err := validateWorkloadReplicas(workload, &capacityPlan, pcs); err != nil {
+		return 0, nil, false, err
 	}
 	return replicas, explicit, required, nil
 }
@@ -509,7 +512,7 @@ func (r *graphReconciler) reconcileWorkloadCapacity(
 			continue
 		}
 
-		if err := workload.ValidateCyborgReplicas(pclq.Spec.Replicas); err != nil {
+		if err := workload.ValidateCyborgReplicas(name, pclq.Spec.Replicas); err != nil {
 			return false, err
 		}
 	}

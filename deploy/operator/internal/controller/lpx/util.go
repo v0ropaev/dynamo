@@ -10,6 +10,7 @@ import (
 	v1alpha1 "github.com/ai-dynamo/dynamo/deploy/operator/api/v1alpha1"
 	v1beta1 "github.com/ai-dynamo/dynamo/deploy/operator/api/v1beta1"
 	"github.com/ai-dynamo/dynamo/deploy/operator/internal/dynamo"
+	"github.com/ai-dynamo/dynamo/deploy/operator/internal/dynamo/lpx"
 	grovecommon "github.com/ai-dynamo/grove/operator/api/common"
 	grovev1alpha1 "github.com/ai-dynamo/grove/operator/api/core/v1alpha1"
 	autoscalingv1 "k8s.io/api/autoscaling/v1"
@@ -213,4 +214,27 @@ func updateScale(ctx context.Context, cl client.Client, resource client.Object, 
 	}
 
 	return cl.SubResource("scale").Update(ctx, resource, client.WithSubResourceBody(scale))
+}
+
+// validateWorkloadReplicas checks live capacity against rendered Agent and Cyborg
+// widths. All inputs are non-nil and describe the same resolved workload.
+func validateWorkloadReplicas(workload *lpx.Workload, plan *lpx.MaterializationPlan, pcs *grovev1alpha1.PodCliqueSet) error {
+	if err := plan.ValidateReplicaCount(); err != nil {
+		return err
+	}
+	if plan.CyborgTemplate == "" {
+		return nil
+	}
+
+	// Recheck the rendered Cyborg width against live scaling-group capacity.
+	for _, clique := range pcs.Spec.Template.Cliques {
+		if clique.Name != plan.CyborgTemplate {
+			continue
+		}
+		name := grovecommon.GeneratePodCliqueName(grovecommon.ResourceNameReplica{
+			Name: plan.LPXScalingGroup, Replica: int(max(0, plan.Replicas-1)),
+		}, plan.CyborgTemplate)
+		return workload.ValidateCyborgReplicas(name, clique.Spec.Replicas)
+	}
+	return nil
 }

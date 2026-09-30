@@ -25,10 +25,14 @@ func (w *Workload) MinimumCyborgReplicas() (int32, error) {
 	return int32(replicas), nil
 }
 
-// ValidateCyborgReplicas ensures that the specified Cyborg replicas are in a valid configuration.
-func (w *Workload) ValidateCyborgReplicas(replicas int32) error {
-	build := &w.modelProjections[0].configuredBuild
-	return validateCyborgReplicas(build, replicas)
+// ValidateCyborgReplicas checks an externally managed Cyborg width in the named
+// clique: it must form complete client groups and valid Pod hostnames.
+// The workload is hybrid.
+func (w *Workload) ValidateCyborgReplicas(cliqueName string, replicas int32) error {
+	if err := validateCyborgReplicas(&w.modelProjections[0].configuredBuild, replicas); err != nil {
+		return err
+	}
+	return validatePodHostname("Cyborg", cliqueName, int(replicas)-1)
 }
 
 // applyCyborgManifestPath projects an authoritative manifest location into one Cyborg container.
