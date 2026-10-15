@@ -24,7 +24,7 @@ const (
 
 // appendModelProjections appends one component's immutable model projections to
 // the caller-owned destination, which may be nil. Existing elements are unchanged.
-// intent.BuildSnapshot contains a normalized, non-nil build; Models is nonempty
+// intent.Build contains a normalized, non-nil build; Models is nonempty
 // and Pipeline is selected by the validated resolver. Source inputs are not mutated;
 // discard error results.
 func appendModelProjections(dst []*ModelProjection, intent ModelProjectionInput) ([]*ModelProjection, error) {
@@ -35,7 +35,7 @@ func appendModelProjections(dst []*ModelProjection, intent ModelProjectionInput)
 		projectionVersion string
 		err               error
 	)
-	switch intent.BuildSnapshot.build.Family {
+	switch intent.Build.family {
 	case BuildFamilyXT:
 		projectionVersion = xtProjectionVersion
 		component, err = projectXTComponent(intent, digestTranscript{&fields})
@@ -43,7 +43,7 @@ func appendModelProjections(dst []*ModelProjection, intent ModelProjectionInput)
 		projectionVersion = hxProjectionVersion
 		component, err = projectHXComponent(intent, digestTranscript{&fields})
 	default:
-		return nil, fmt.Errorf("unsupported LPX target family %q", intent.BuildSnapshot.build.Family)
+		return nil, fmt.Errorf("unsupported LPX target family %q", intent.Build.family)
 	}
 	if err != nil {
 		return nil, err
@@ -51,7 +51,7 @@ func appendModelProjections(dst []*ModelProjection, intent ModelProjectionInput)
 	// Bound the component's physical build before runtime expansion and request publication.
 	boundedPartitions := len(component.partitions)
 	if len(component.localPartitionIDs) > 0 {
-		boundedPartitions = len(intent.BuildSnapshot.build.Partitions)
+		boundedPartitions = len(intent.Build.partitions)
 	} else if boundedPartitions < 1 {
 		return nil, fmt.Errorf("LPX projection has %d partitions, limit is 1..%d", boundedPartitions, maxLPXPartitions)
 	}
@@ -60,8 +60,8 @@ func appendModelProjections(dst []*ModelProjection, intent ModelProjectionInput)
 	}
 
 	// Publish distinct logical identities backed by the component's immutable configuration.
-	component.contractFormat = intent.BuildSnapshot.format
-	component.compilerSnapshotDigest = intent.BuildSnapshot.contentID
+	component.contractFormat = intent.Build.contractFormat
+	component.compilerSnapshotDigest = intent.Build.contentID
 	component.runtimeBuildRef = intent.RuntimeBuildRef
 	component.pipeline = intent.Pipeline
 	for _, model := range intent.Models {
@@ -82,11 +82,11 @@ func workloadSetDigest(projections []*ModelProjection) (WorkloadDigest, error) {
 	transcript := digestTranscript{hash}
 	transcript.field("schema", []byte(workloadSetDigestVersion))
 	for _, projection := range projections {
-		if projection.configuredBuild.Family != first.configuredBuild.Family {
+		if projection.configuredBuild.family != first.configuredBuild.family {
 			return WorkloadDigest{}, fmt.Errorf(
 				"LPX model projections have mixed target families %q and %q",
-				first.configuredBuild.Family,
-				projection.configuredBuild.Family,
+				first.configuredBuild.family,
+				projection.configuredBuild.family,
 			)
 		}
 		transcript.field("model", []byte(projection.model))
@@ -104,9 +104,9 @@ func modelProjectionDigest(intent ModelProjectionInput, projectionVersion, model
 	transcript.field("projection-version", []byte(projectionVersion))
 	// Ref is an acquisition locator, not build content. In particular, a
 	// file-backed snapshot's ref contains its absolute checkout path.
-	transcript.field("build-content-id", []byte(intent.BuildSnapshot.contentID))
+	transcript.field("build-content-id", []byte(intent.Build.contentID))
 	// Bind the family and pipeline directly; the pipeline already determines runtime mode.
-	transcript.field("family", []byte(intent.BuildSnapshot.build.Family))
+	transcript.field("family", []byte(intent.Build.family))
 	transcript.field("pipeline", []byte(intent.Pipeline))
 	transcript.field("model", []byte(model))
 	_, _ = hash.Write(fields)

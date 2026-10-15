@@ -19,12 +19,12 @@ const (
 )
 
 func projectHXComponent(intent ModelProjectionInput, transcript digestTranscript) (ModelProjection, error) {
-	runtimeBuild := *intent.BuildSnapshot.build
-	manifestPartitions := runtimeBuild.Partitions
+	runtimeBuild := *intent.Build
+	manifestPartitions := runtimeBuild.partitions
 
-	ioFPGACount, ioFanoutFactor := runtimeBuild.IOFPGACount, runtimeBuild.IOFanoutFactor
+	ioFPGACount, ioFanoutFactor := runtimeBuild.ioFPGACount, runtimeBuild.ioFanoutFactor
 
-	edgePositions, err := validateSelectedPropSyncGraph(manifestPartitions, runtimeBuild.SelectedPropSyncChains, "selected HX prop-sync chain")
+	edgePositions, err := validateSelectedPropSyncGraph(manifestPartitions, runtimeBuild.selectedPropSyncChains, "selected HX prop-sync chain")
 	if err != nil {
 		return ModelProjection{}, err
 	}
@@ -46,34 +46,34 @@ func projectHXComponent(intent ModelProjectionInput, transcript digestTranscript
 		edgePositions = nil
 
 		partition := &partitions[0]
-		nodes, width := int64(partition.effectiveNodeCount()), int64(partition.DevicesPerNode)
+		nodes, width := int64(partition.effectiveNodeCount()), int64(partition.devicesPerNode)
 		switch {
 		case nodes <= 8:
-			partition.HXExtent = []int64{width, nodes, 1, 1}
+			partition.hxExtent = []int64{width, nodes, 1, 1}
 		case nodes <= 16 && nodes%2 == 0:
-			partition.HXExtent = []int64{width, nodes / 2, 2, 1}
+			partition.hxExtent = []int64{width, nodes / 2, 2, 1}
 		case nodes == 32:
-			partition.HXExtent = []int64{width, 8, 2, 2}
+			partition.hxExtent = []int64{width, 8, 2, 2}
 		default:
-			return ModelProjection{}, fmt.Errorf("packed chain chip count %d does not fit a supported HX extent", partition.NumChips)
+			return ModelProjection{}, fmt.Errorf("packed chain chip count %d does not fit a supported HX extent", partition.numChips)
 		}
 	}
 
 	// Keep GPU-local runtime partitions out of every LPU reservation and runtime record.
 	// Selection requires a hybrid build, which is never packed, so partitions still
 	// match the manifest order.
-	remote, localPartitionIDs, err := selectRemotePartitions(intent.LocalPartitions, intent.Pipeline, intent.BuildSnapshot.build, partitions)
+	remote, localPartitionIDs, err := selectRemotePartitions(intent.LocalPartitions, intent.Pipeline, intent.Build, partitions)
 	if err != nil {
 		return ModelProjection{}, err
 	}
 	if len(localPartitionIDs) > 0 {
 		edgePositions = retainedPropSyncEdges(partitions, remote, edgePositions)
 		partitions = remote
-		runtimeBuild.Partitions = remote
+		runtimeBuild.partitions = remote
 	}
 
 	// Selected chains are represented by the allocation metadata and connectors below.
-	runtimeBuild.SelectedPropSyncChains = nil
+	runtimeBuild.selectedPropSyncChains = nil
 	allocationMetadata, connectors, err := projectHXPropSync(partitions, edgePositions)
 	if err != nil {
 		return ModelProjection{}, err
@@ -90,7 +90,7 @@ func projectHXComponent(intent ModelProjectionInput, transcript digestTranscript
 	for index, partition := range partitions {
 		agentReplicas += partition.effectiveNodeCount()
 		transcript.intField("ordered-compiler-id-index", int64(index))
-		transcript.uint32Field("ordered-compiler-id", uint32(partition.SourcePartitionID))
+		transcript.uint32Field("ordered-compiler-id", uint32(partition.sourcePartitionID))
 	}
 
 	transcript.field("allocation-metadata", allocationMetadata)
@@ -111,15 +111,15 @@ func projectHXComponent(intent ModelProjectionInput, transcript digestTranscript
 // declaration order and drops every edge with a GPU-local endpoint. A selected
 // chain moves to the GPU as one runtime partition, so both endpoints of an edge
 // share one placement and a retained edge joins adjacent retained positions.
-func retainedPropSyncEdges(partitions, remote []BuildPartition, edgePositions []int) []int {
+func retainedPropSyncEdges(partitions, remote []buildPartition, edgePositions []int) []int {
 	retainedOrdinal := make(map[int]int, len(remote))
 	for ordinal, partition := range remote {
-		retainedOrdinal[partition.SourcePartitionID] = ordinal
+		retainedOrdinal[partition.sourcePartitionID] = ordinal
 	}
 	retained := make([]int, 0, len(edgePositions))
 	for _, position := range edgePositions {
-		from, fromRetained := retainedOrdinal[partitions[position].SourcePartitionID]
-		_, toRetained := retainedOrdinal[partitions[position+1].SourcePartitionID]
+		from, fromRetained := retainedOrdinal[partitions[position].sourcePartitionID]
+		_, toRetained := retainedOrdinal[partitions[position+1].sourcePartitionID]
 		if fromRetained && toRetained {
 			retained = append(retained, from)
 		}
@@ -128,15 +128,15 @@ func retainedPropSyncEdges(partitions, remote []BuildPartition, edgePositions []
 }
 
 // Each edgePositions entry is a source index whose destination is position+1.
-func projectHXPropSync(partitions []BuildPartition, edgePositions []int) (json.RawMessage, []lpxv1alpha1.PropSyncConnectorRequest, error) {
+func projectHXPropSync(partitions []buildPartition, edgePositions []int) (json.RawMessage, []lpxv1alpha1.PropSyncConnectorRequest, error) {
 	// Project each physical partition into the HX allocation metadata envelope.
 	partitionInfo := make(map[string]any, len(partitions)+1)
 	partitionInfo["num_partitions"] = len(partitions)
 	for _, partition := range partitions {
-		compilerID := uint32(partition.SourcePartitionID)
+		compilerID := uint32(partition.sourcePartitionID)
 		partitionInfo[strconv.FormatUint(uint64(compilerID), 10)] = map[string]any{
 			"device":     hxLPUDevice,
-			"allocation": partition.HXExtent,
+			"allocation": partition.hxExtent,
 		}
 	}
 
@@ -148,14 +148,14 @@ func projectHXPropSync(partitions []BuildPartition, edgePositions []int) (json.R
 	for _, fromPosition := range edgePositions {
 		source := partitions[fromPosition]
 		destination := partitions[fromPosition+1]
-		if source.DevicesPerNode > remainingConnections {
+		if source.devicesPerNode > remainingConnections {
 			return nil, nil, fmt.Errorf("HX prop-sync graph exceeds %d logical connections", maxConnections)
 		}
-		remainingConnections -= source.DevicesPerNode
+		remainingConnections -= source.devicesPerNode
 
-		logicalConnections := make([]lpxv1alpha1.HxLogicalConnection, source.DevicesPerNode)
-		connections := make([][2]int64, source.DevicesPerNode)
-		sourceOffset := int64((source.effectiveNodeCount() - 1) * source.DevicesPerNode)
+		logicalConnections := make([]lpxv1alpha1.HxLogicalConnection, source.devicesPerNode)
+		connections := make([][2]int64, source.devicesPerNode)
+		sourceOffset := int64((source.effectiveNodeCount() - 1) * source.devicesPerNode)
 		for logicalDevice := range logicalConnections {
 			from := sourceOffset + int64(logicalDevice)
 			logicalConnections[logicalDevice] = lpxv1alpha1.HxLogicalConnection{
@@ -166,8 +166,8 @@ func projectHXPropSync(partitions []BuildPartition, edgePositions []int) (json.R
 		}
 		acceptableLaneMultiplicities := []int64{4, 2, 1}
 		propSyncPairs = append(propSyncPairs, map[string]any{
-			"source_partition":    source.SourcePartitionID,
-			"dest_partition":      destination.SourcePartitionID,
+			"source_partition":    source.sourcePartitionID,
+			"dest_partition":      destination.sourcePartitionID,
 			"connections":         connections,
 			"num_supported_lanes": acceptableLaneMultiplicities,
 		})
