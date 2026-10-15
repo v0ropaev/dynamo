@@ -25,7 +25,7 @@ const gbuildManifestPathEnv = "GBUILD_MANIFEST_PATH"
 
 // MinimumCyborgReplicas returns one complete client group for a resolved hybrid workload.
 func (w *Workload) MinimumCyborgReplicas() (int32, error) {
-	build := &w.modelProjections[0].configuredBuild
+	build := &w.models[0].configuredBuild
 	replicas := int64(build.ioFPGACount) * int64(build.ioFanoutFactor)
 	if replicas > math.MaxInt32 {
 		return 0, fmt.Errorf("minimum Cyborg replicas %d exceeds the PodClique replica limit %d", replicas, math.MaxInt32)
@@ -37,14 +37,14 @@ func (w *Workload) MinimumCyborgReplicas() (int32, error) {
 // clique: it must form complete client groups and valid Pod hostnames.
 // The workload is hybrid.
 func (w *Workload) ValidateCyborgReplicas(cliqueName string, replicas int32) error {
-	if err := validateCyborgReplicas(&w.modelProjections[0].configuredBuild, replicas); err != nil {
+	if err := validateCyborgReplicas(&w.models[0].configuredBuild, replicas); err != nil {
 		return err
 	}
 	return validatePodHostname("Cyborg", cliqueName, int(replicas)-1)
 }
 
 // applyCyborgManifestPath projects an authoritative manifest location into one Cyborg container.
-func applyCyborgManifestPath(container *corev1.Container, projection *ModelProjection, modelStoragePath string) error {
+func applyCyborgManifestPath(container *corev1.Container, projection *Model, modelStoragePath string) error {
 	buildRoot, err := buildRuntimePath(projection.configuredBuild.path, projection.runtimeBuildRef, modelStoragePath)
 	if err != nil {
 		return fmt.Errorf("resolve GBuild manifest path: %w", err)
@@ -95,7 +95,7 @@ func validateCyborgReplicas(build *Build, replicas int32) error {
 // cyborgConfigMap is the nonnil Agent-address ConfigMap rendered for that workload.
 func configureHybridCyborg(
 	cyborg *grovev1alpha1.PodCliqueTemplateSpec,
-	projection *ModelProjection,
+	projection *Model,
 	workloadDigest string,
 	modelStoragePath string,
 	agentTemplateNames []string,
@@ -137,7 +137,7 @@ func configureHybridCyborg(
 // validated, and describe the selected hybrid model.
 // The workload and plan are not mutated. The caller assigns the returned ConfigMap's namespace.
 func (w *Workload) renderCyborgConfigMap(plan *MaterializationPlan) (*corev1.ConfigMap, string, error) {
-	projection := w.modelProjections[0]
+	projection := w.models[0]
 	build := &projection.configuredBuild
 
 	// Cyborg runs a selected prop-sync chain as one runtime partition and
