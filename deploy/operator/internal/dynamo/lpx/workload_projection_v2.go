@@ -81,7 +81,7 @@ func appendV2ModelProjections(dst []*ModelProjection, intent ModelProjectionInpu
 	}
 
 	// Preserve physical scheduler partitions while collapsing selected chains only in LPU runtime state.
-	if intent.Pipeline == PipelineLPX && len(configured.SelectedPropSyncChains) != 0 {
+	if intent.Pipeline == PipelineHybrid && len(configured.SelectedPropSyncChains) != 0 {
 		runtimeChainByRoot := make(map[int][]int, len(connectorBuild.SelectedPropSyncChains))
 		for _, chain := range connectorBuild.SelectedPropSyncChains {
 			runtimeChainByRoot[chain[0]] = chain

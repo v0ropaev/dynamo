@@ -237,7 +237,7 @@ func TestDeploymentContractAcquisitionAndRuntimePath(t *testing.T) {
 
 			t.Log("Pass the selected deployment file to Cyborg before authored environment references")
 			projections, err := appendModelProjections(nil, ModelProjectionInput{
-				Pipeline: PipelineLPX, Models: []string{"default"}, BuildSnapshot: normalized,
+				Pipeline: PipelineHybrid, Models: []string{"default"}, BuildSnapshot: normalized,
 			})
 			require.NoError(t, err)
 			require.Len(t, projections, 1)
